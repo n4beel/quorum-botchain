@@ -2,9 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { BaseError, formatEther, isAddress, type Address, type Hex } from "viem";
 import {
-  useAccount, useBalance, useChainId, useReadContract, useReadContracts,
+  BaseError, ContractFunctionRevertedError, formatEther, isAddress, type Address, type Hex,
+} from "viem";
+import {
+  useAccount, useBalance, useChainId, usePublicClient, useReadContract, useReadContracts,
   useWaitForTransactionReceipt, useWriteContract,
 } from "wagmi";
 import Panel from "@/components/ui/Panel";
@@ -19,6 +21,7 @@ import { quorumAbi } from "@/lib/botchain/abi";
 import CopyAddress from "@/components/ui/CopyAddress";
 import SavedWallets from "@/components/quorum/SavedWallets";
 import { rememberWallet } from "@/lib/saved-wallets";
+import { canAffordPayment, explainQuorumError } from "@/lib/errors";
 
 /**
  * Every write this page can make, with its arguments.
@@ -46,6 +49,9 @@ function WalletBody() {
   const { address } = useAccount();
   const { toast } = useToast();
   const { writeContractAsync } = useWriteContract();
+  // wagmi memoises the client per config and chain, so its identity is stable between renders —
+  // unlike the query results the rule exists to catch. stable-hook-result
+  const publicClient = usePublicClient(); // stable-hook-result
   const search = useSearchParams();
   const fromQuery = search.get("address") ?? "";
 
@@ -150,6 +156,21 @@ function WalletBody() {
       settled.current = null;
       try {
         const target = { address: wallet, abi: quorumAbi, chainId } as const;
+        // Ask the chain first. A multisig execute that will revert — almost always an unfunded
+        // wallet — otherwise costs gas and comes back as a bare "failed", with the reason buried
+        // in a receipt that carries no revert data.
+        //
+        // Both calls stay inline rather than sharing a hoisted object: naming it collapses the
+        // tuple union and loses the link between the function name and its arguments, which is
+        // the very thing being guarded here.
+        if (publicClient && address) {
+          await publicClient.simulateContract(
+            call[0] === "submit"
+              ? { ...target, functionName: "submit", args: [call[1], call[2], call[3]], account: address }
+              : { ...target, functionName: call[0], args: [call[1]], account: address },
+          );
+        }
+
         const txHash = await writeContractAsync(
           call[0] === "submit"
             ? { ...target, functionName: "submit", args: [call[1], call[2], call[3]] }
@@ -159,12 +180,29 @@ function WalletBody() {
         setStage("pending");
       } catch (err) {
         setStage("idle");
+
+        const reverted =
+          err instanceof BaseError
+            ? err.walk((e) => e instanceof ContractFunctionRevertedError)
+            : null;
+        if (reverted instanceof ContractFunctionRevertedError) {
+          toast(
+            "error",
+            "The wallet refused this",
+            explainQuorumError(reverted.data?.errorName, reverted.data?.args, {
+              symbol: activeBotChain.nativeCurrency.symbol,
+              balance: balance?.value,
+            }),
+          );
+          return;
+        }
+
         const message = err instanceof BaseError ? err.shortMessage : "Something went wrong.";
         if (/rejected|denied/i.test(message)) toast("info", "Cancelled", "Nothing was sent.");
         else toast("error", "Could not send", message);
       }
     },
-    [wallet, chainId, writeContractAsync, toast],
+    [wallet, chainId, writeContractAsync, publicClient, address, balance?.value, toast],
   );
 
   const parsedValue = parseNativeAmount(value);
@@ -284,6 +322,7 @@ function WalletBody() {
                 const confirmed = Number(txn.confirmations);
                 const need = Number(threshold);
                 const iConfirmed = Boolean(mine.data?.[i]?.result);
+                const affordable = canAffordPayment(txn.value, balance?.value);
                 const canExecute = !txn.executed && confirmed >= need;
 
                 return (
@@ -329,11 +368,25 @@ function WalletBody() {
                           </Button>
                         )}
                         {canExecute && (
-                          <Button size="sm" onClick={() => send(["execute", id])}>
+                          <Button
+                            size="sm"
+                            disabled={!affordable}
+                            title={affordable ? undefined : "The wallet does not hold enough to pay this"}
+                            onClick={() => send(["execute", id])}
+                          >
                             Execute
                           </Button>
                         )}
                       </div>
+                    )}
+
+                    {isOwner && canExecute && !affordable && (
+                      <p className="text-[12px] leading-relaxed" style={{ color: "var(--warning)" }}>
+                        Signed and ready, but the wallet holds{" "}
+                        {balance ? formatEther(balance.value) : "0"} {symbol} and this pays{" "}
+                        {formatEther(txn.value)} {symbol}. Send funds to the wallet address above
+                        and the button turns on.
+                      </p>
                     )}
                   </div>
                 );
