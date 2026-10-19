@@ -16,6 +16,23 @@ import { useToast } from "@/components/ui/Toast";
 import { activeBotChain, addressUrl, isBotChainId } from "@/lib/botchain/chain";
 import { parseNativeAmount } from "@/lib/botchain/amount";
 import { quorumAbi } from "@/lib/botchain/abi";
+import CopyAddress from "@/components/ui/CopyAddress";
+import SavedWallets from "@/components/quorum/SavedWallets";
+import { rememberWallet } from "@/lib/saved-wallets";
+
+/**
+ * Every write this page can make, with its arguments.
+ *
+ * The arguments used to be passed as `readonly unknown[]` and cast to `never` at the call to
+ * wagmi, which meant a `submit` missing its `data` argument typechecked cleanly and only failed
+ * in the browser, at encoding time. Spelling the tuples out here puts that back under the
+ * compiler: `submit` is (to, value, data), the rest take a txId.
+ */
+type QuorumWrite =
+  | readonly ["submit", Address, bigint, Hex]
+  | readonly ["confirm", bigint]
+  | readonly ["revoke", bigint]
+  | readonly ["execute", bigint];
 
 /**
  * A wallet's queue: what has been proposed, who has signed it, and what can be executed.
@@ -109,17 +126,35 @@ function WalletBody() {
     }
   }, [hash, receipt.isSuccess, receipt.isError, toast, refetchAll]);
 
+  // A successful read is the proof that this address is a Quorum wallet; nothing else in the app
+  // can tell. Saving here means pasting an address once is enough to keep it on the list.
+  //
+  // The dependency is the owner COUNT, not the array: wagmi hands back a fresh array after every
+  // refetch, and an array here would re-run the effect on each render, write a new savedAt, and
+  // spin. The ref keeps it to one write per wallet even so.
+  const remembered = useRef<string | null>(null);
+  const ownerCount = owners?.length ?? 0;
+  useEffect(() => {
+    if (!wallet || !isBotChainId(chainId) || ownerCount === 0) return;
+    const key = `${chainId}:${wallet.toLowerCase()}`;
+    if (remembered.current === key) return;
+    remembered.current = key;
+    rememberWallet(wallet, chainId);
+  }, [wallet, chainId, ownerCount]);
+
   const send = useCallback(
-    async (functionName: "submit" | "confirm" | "revoke" | "execute", args: readonly unknown[]) => {
+    async (call: QuorumWrite) => {
       if (!wallet || !isBotChainId(chainId)) return;
       setStage("signing");
       setHash(null);
       settled.current = null;
       try {
-        const txHash = await writeContractAsync({
-          address: wallet, abi: quorumAbi, functionName,
-          args: args as never, chainId,
-        });
+        const target = { address: wallet, abi: quorumAbi, chainId } as const;
+        const txHash = await writeContractAsync(
+          call[0] === "submit"
+            ? { ...target, functionName: "submit", args: [call[1], call[2], call[3]] }
+            : { ...target, functionName: call[0], args: [call[1]] },
+        );
         setHash(txHash);
         setStage("pending");
       } catch (err) {
@@ -138,15 +173,29 @@ function WalletBody() {
 
   return (
     <div className="flex flex-col gap-5">
+      <SavedWallets current={wallet} />
+
       <Panel>
-        <Input
-          label="Wallet address"
-          value={typed}
-          onChange={(e) => setTyped(e.target.value)}
-          placeholder="0x…"
-          mono
-          hint="No wallet needed to read one."
-        />
+        <div className="flex flex-col gap-3">
+          <Input
+            label="Wallet address"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            placeholder="0x…"
+            mono
+            hint="No wallet needed to read one."
+          />
+          {wallet && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <CopyAddress value={wallet} label="copy address" />
+              <a href={addressUrl(chainId, wallet)} target="_blank" rel="noreferrer"
+                className="mono text-[11px] uppercase tracking-[0.08em] underline"
+                style={{ color: "var(--text-tertiary)" }}>
+                explorer
+              </a>
+            </div>
+          )}
+        </div>
       </Panel>
 
       {ready && summary.isLoading && <Panel><Spinner label="Reading the chain" /></Panel>}
@@ -207,7 +256,7 @@ function WalletBody() {
                   placeholder="1.5" mono
                   error={value.trim() !== "" && parsedValue === null ? "Not an amount this app will send." : undefined}
                   hint={balance && parsedValue !== null && parsedValue > balance.value ? "More than the wallet holds — it will fail at execution." : undefined} />
-                <Button disabled={!canSubmit} onClick={() => send("submit", [to.trim() as Address, parsedValue!])}>
+                <Button disabled={!canSubmit} onClick={() => send(["submit", to.trim() as Address, parsedValue!, "0x"])}>
                   Propose
                 </Button>
               </div>
@@ -271,16 +320,16 @@ function WalletBody() {
                     {isOwner && !txn.executed && (
                       <div className="flex flex-wrap gap-2 mt-1">
                         {iConfirmed ? (
-                          <Button size="sm" variant="ghost" onClick={() => send("revoke", [id])}>
+                          <Button size="sm" variant="ghost" onClick={() => send(["revoke", id])}>
                             Revoke
                           </Button>
                         ) : (
-                          <Button size="sm" onClick={() => send("confirm", [id])}>
+                          <Button size="sm" onClick={() => send(["confirm", id])}>
                             Confirm
                           </Button>
                         )}
                         {canExecute && (
-                          <Button size="sm" onClick={() => send("execute", [id])}>
+                          <Button size="sm" onClick={() => send(["execute", id])}>
                             Execute
                           </Button>
                         )}

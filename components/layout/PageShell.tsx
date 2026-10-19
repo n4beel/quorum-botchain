@@ -51,9 +51,9 @@ export default function PageShell({ children, nav = [], title, description }: Pa
           <div className="px-5 md:px-8 py-4 flex items-center justify-between gap-4">
             <Link href="/" className="flex items-center gap-2.5 no-underline">
               <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-                <circle cx="6" cy="10" r="3.2" fill="none" stroke="var(--accent)" strokeWidth="1.8" />
-                <circle cx="14" cy="6" r="3.2" fill="none" stroke="var(--accent)" strokeWidth="1.8" />
-                <circle cx="14" cy="14" r="3.2" fill="none" stroke="var(--border-strong)" strokeWidth="1.8" />
+                <circle cx="6.4" cy="7.2" r="3" fill="var(--accent)" />
+                <circle cx="13.6" cy="7.2" r="3" fill="var(--accent)" />
+                <circle cx="10" cy="14" r="3" fill="none" stroke="var(--accent)" strokeWidth="1.6" />
               </svg>
               <span className="mono text-[17px] font-medium tracking-[-0.02em]">{app.name}</span>
             </Link>

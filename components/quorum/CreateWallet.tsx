@@ -12,6 +12,8 @@ import { useToast } from "@/components/ui/Toast";
 import { addressUrl, isBotChainId } from "@/lib/botchain/chain";
 import { getDeployment } from "@/lib/botchain/deployment";
 import { quorumFactoryAbi } from "@/lib/botchain/abi";
+import CopyAddress from "@/components/ui/CopyAddress";
+import { rememberWallet } from "@/lib/saved-wallets";
 import { isDeployable, MAX_OWNERS, newOwner, validateSigners, type OwnerRow } from "@/lib/owners";
 
 /**
@@ -65,9 +67,11 @@ export default function CreateWallet() {
       }
     }
     setWallet(created);
+    // Nothing else can recover this address later — the factory emitted it once.
+    if (created && isBotChainId(chainId)) rememberWallet(created, chainId);
     setStage("confirmed");
     toast("success", "Wallet deployed", "Fund it, then propose a transaction.");
-  }, [hash, receipt.isSuccess, receipt.isError, receipt.data, toast]);
+  }, [hash, receipt.isSuccess, receipt.isError, receipt.data, chainId, toast]);
 
   const handleCreate = useCallback(async () => {
     if (!deployment || !isBotChainId(chainId) || !ready) return;
@@ -103,6 +107,7 @@ export default function CreateWallet() {
 
   if (stage === "confirmed") {
     return (
+      <div className="flex flex-col gap-5">
       <Panel>
         <div className="flex flex-col gap-4">
           <TxStatus stage="confirmed" hash={hash} confirmedLabel="Wallet deployed" />
@@ -112,10 +117,13 @@ export default function CreateWallet() {
                 <span className="mono text-[11px] uppercase tracking-[0.08em]" style={{ color: "var(--text-tertiary)" }}>
                   Wallet address
                 </span>
-                <a href={addressUrl(chainId, wallet)} target="_blank" rel="noreferrer"
-                  className="mono text-[13px] break-all underline" style={{ color: "var(--accent)" }}>
-                  {wallet}
-                </a>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <a href={addressUrl(chainId, wallet)} target="_blank" rel="noreferrer"
+                    className="mono text-[13px] break-all underline" style={{ color: "var(--accent)" }}>
+                    {wallet}
+                  </a>
+                  <CopyAddress value={wallet} label="copy address" />
+                </div>
               </div>
               <p className="text-[12px]" style={{ color: "var(--text-tertiary)" }}>
                 Send BOT to that address to fund it. Any of the {set.owners.length} signers can then
@@ -128,6 +136,7 @@ export default function CreateWallet() {
           )}
         </div>
       </Panel>
+      </div>
     );
   }
 
