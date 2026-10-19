@@ -132,6 +132,11 @@ function WalletBody() {
     }
   }, [hash, receipt.isSuccess, receipt.isError, toast, refetchAll]);
 
+  // useReadContracts defaults to allowFailure, so a call that reverts lands as an undefined
+  // `result` inside `data` and never sets isError. Reading the flag alone left a well-formed but
+  // wrong address — one belonging to the other network, say — rendering nothing whatsoever.
+  const unreadable = !summary.isLoading && (summary.isError || owners === undefined);
+
   // A successful read is the proof that this address is a Quorum wallet; nothing else in the app
   // can tell. Saving here means pasting an address once is enough to keep it on the list.
   //
@@ -238,10 +243,11 @@ function WalletBody() {
 
       {ready && summary.isLoading && <Panel><Spinner label="Reading the chain" /></Panel>}
 
-      {ready && summary.isError && (
+      {ready && unreadable && (
         <Panel>
           <p className="text-[13px]" style={{ color: "var(--warning)" }}>
-            Could not read that address. Either it is not a Quorum wallet, or the chain did not answer.
+            Could not read that address on {activeBotChain.name}. Either it is not a Quorum wallet,
+            it lives on the other network, or the chain did not answer.
           </p>
         </Panel>
       )}
