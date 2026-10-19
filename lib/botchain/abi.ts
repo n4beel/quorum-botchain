@@ -116,19 +116,6 @@ export const quorumAbi = [
   },
   {
     type: "function",
-    name: "_transactions",
-    stateMutability: "view",
-    inputs: [{ name: "txId", type: "uint256" }],
-    outputs: [
-      { name: "to", type: "address" },
-      { name: "value", type: "uint256" },
-      { name: "data", type: "bytes" },
-      { name: "executed", type: "bool" },
-      { name: "confirmations", type: "uint256" },
-    ],
-  },
-  {
-    type: "function",
     name: "txCount",
     stateMutability: "view",
     inputs: [],
