@@ -16,16 +16,28 @@ import * as limits from "../owners";
  * the code sitting beside it.
  */
 
+
+const UNIT_SECONDS: Record<string, bigint> = {
+  seconds: 1n,
+  minutes: 60n,
+  hours: 3600n,
+  days: 86400n,
+  weeks: 604800n,
+};
+
 const SRC = join(__dirname, "..", "..", "contracts", "src");
 
 function solidityConstants(): Map<string, bigint> {
   const found = new Map<string, bigint>();
   for (const file of readdirSync(SRC).filter((f) => f.endsWith(".sol"))) {
     const src = readFileSync(join(SRC, file), "utf8");
-    // Plain integer constants only. Ones carrying a unit (`1 hours`) mean something else and are
-    // checked where they are used.
-    for (const m of src.matchAll(/constant\s+([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*;/g)) {
-      found.set(m[1], BigInt(m[2]));
+    // Plain integers, and the ones carrying a Solidity time unit — `MIN_INTERVAL = 1 hours` is
+    // 3600 to every caller, and the app declares it that way, so the two are comparable.
+    for (const m of src.matchAll(
+      /constant\s+([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*(seconds|minutes|hours|days|weeks)?\s*;/g,
+    )) {
+      const unit = m[3] ? UNIT_SECONDS[m[3]] : 1n;
+      found.set(m[1], BigInt(m[2]) * unit);
     }
   }
   return found;
